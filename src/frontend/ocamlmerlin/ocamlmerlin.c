@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <Lmcons.h>
 #include <process.h>
+#include <Sddl.h>       // ConvertSidToStringSid
 #ifndef STDIN_FILENO
 #define STDIN_FILENO 0
 #endif
@@ -528,20 +529,45 @@ static void compute_socketname(char socketname[PATHSZ], struct stat *st)
 {
 #ifdef _WIN32
   CHAR user[UNLEN + 1];
-  DWORD dwBufSize = UNLEN;
+  DWORD user_sz = UNLEN + 1;
   BY_HANDLE_FILE_INFORMATION info;
   HANDLE hFile = CreateFile(merlin_path, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
   if (hFile == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(hFile, &info))
     failwith_perror("stat (cannot find ocamlmerlin binary)");
   CloseHandle(hFile);
 
-  if (!GetUserName(user, &dwBufSize))
+  if (!GetUserName(user, &user_sz))
     user[0] = '\0';
-   
-  for (int i = 0; user[i] != '\0' && i <= UNLEN; i++)
-     if (isspace(user[i]))
-        user[i] = '_';
-   
+  else {
+    CHAR sid_buffer[1024];
+    DWORD sid_buffer_sz = 1024;
+    SID * sid = (SID *)sid_buffer;
+    CHAR * domain_name = (CHAR*) GlobalAlloc(GPTR, 1024);
+    DWORD domain_name_sz = 1024;
+    SID_NAME_USE sid_type;
+
+    if (!LookupAccountName(NULL, user, sid_buffer, &sid_buffer_sz, domain_name, &domain_name_sz, &sid_type))
+      user[0] = '\0';
+    else {
+      CHAR * pszSID = NULL;
+      if (!ConvertSidToStringSid(sid, &pszSID))
+    user[0] = '\0';
+      else {
+        for (int i = 0; i <= UNLEN; i++){
+          if (pszSID[i] == '\r' || pszSID[i] == '\0')
+          {
+            user[i] = '\0';
+            break;
+          }
+          user[i] = pszSID[i];
+        }
+        LocalFree(pszSID);
+      }
+    }
+
+    GlobalFree(domain_name);
+  }
+
   // @@DRA Need to use Windows API functions to get meaningful values for st_dev and st_ino
   snprintf(eventname, PATHSZ,
       "ocamlmerlin_%s_%lx_%llx",
