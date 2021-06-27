@@ -522,60 +522,84 @@ static void compute_merlinpath(char merlin_path[PATHSZ], const char *argv0, stru
 }
 
 #ifdef _WIN32
+
+/* May return NULL */
+char * retrieve_user_sid_string()
+{
+  char * usidstr = NULL;
+
+  void * process_token = NULL;
+  if ( ! OpenProcessToken( GetCurrentProcess(), TOKEN_QUERY, &process_token ) )
+    return usidstr;
+
+  unsigned long sid_buffer_size = 0;
+  if ( ! GetTokenInformation(process_token, TokenUser, NULL, 0, &sid_buffer_size ) &&
+        ( GetLastError() != ERROR_INSUFFICIENT_BUFFER ) )
+  {
+    CloseHandle( process_token );
+    process_token = NULL;
+    return usidstr;
+  }
+
+  TOKEN_USER * token_user_ptr = (PTOKEN_USER) malloc(sid_buffer_size);
+  if ( ! token_user_ptr)
+  {
+    CloseHandle( process_token);
+    process_token = NULL;
+    return usidstr;
+  }
+
+  if ( ! GetTokenInformation(process_token, TokenUser, token_user_ptr,
+                             sid_buffer_size, &sid_buffer_size))
+  {
+    free(token_user_ptr);
+    token_user_ptr = NULL;
+    CloseHandle( process_token );
+    process_token = NULL;
+    return usidstr;
+  }
+
+  ConvertSidToStringSid(token_user_ptr->User.Sid, &usidstr);
+
+  free(token_user_ptr);
+  token_user_ptr = NULL;
+  CloseHandle(process_token);
+  process_token = NULL;
+
+  return usidstr;
+}
+
 static void compute_socketname(char socketname[PATHSZ], char eventname[PATHSZ], const char merlin_path[PATHSZ])
 #else
 static void compute_socketname(char socketname[PATHSZ], struct stat *st)
 #endif
 {
 #ifdef _WIN32
-  CHAR user[UNLEN + 1];
-  DWORD user_sz = UNLEN + 1;
   BY_HANDLE_FILE_INFORMATION info;
   HANDLE hFile = CreateFile(merlin_path, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
   if (hFile == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(hFile, &info))
     failwith_perror("stat (cannot find ocamlmerlin binary)");
   CloseHandle(hFile);
 
-  if (!GetUserName(user, &user_sz))
-    user[0] = '\0';
-  else {
-    CHAR sid_buffer[1024];
-    DWORD sid_buffer_sz = 1024;
-    SID * sid = (SID *)sid_buffer;
-    CHAR * domain_name = (CHAR*) GlobalAlloc(GPTR, 1024);
-    DWORD domain_name_sz = 1024;
-    SID_NAME_USE sid_type;
+  char * user_sid_string = retrieve_user_sid_string();
 
-    if (!LookupAccountName(NULL, user, sid_buffer, &sid_buffer_sz, domain_name, &domain_name_sz, &sid_type))
-      user[0] = '\0';
-    else {
-      CHAR * pszSID = NULL;
-      if (!ConvertSidToStringSid(sid, &pszSID))
-    user[0] = '\0';
-      else {
-        for (int i = 0; i <= UNLEN; i++){
-          if (pszSID[i] == '\r' || pszSID[i] == '\0')
-          {
-            user[i] = '\0';
-            break;
-          }
-          user[i] = pszSID[i];
-        }
-        LocalFree(pszSID);
-      }
-    }
-
-    GlobalFree(domain_name);
+  if (! user_sid_string)
+  {
+    user_sid_string = LocalAlloc(LPTR, 1);
+    user_sid_string[0] = '\0';
   }
 
   // @@DRA Need to use Windows API functions to get meaningful values for st_dev and st_ino
   snprintf(eventname, PATHSZ,
       "ocamlmerlin_%s_%lx_%llx",
-      user,
+      user_sid_string,
       info.dwVolumeSerialNumber,
       ((__int64)info.nFileIndexHigh) << 32 | ((__int64)info.nFileIndexLow));
   snprintf(socketname, PATHSZ,
       "\\\\.\\pipe\\%s", eventname);
+
+  LocalFree(user_sid_string);
+  user_sid_string = NULL;
 #else
   snprintf(socketname, PATHSZ,
       "ocamlmerlin_%llu_%llu_%llu.socket",
