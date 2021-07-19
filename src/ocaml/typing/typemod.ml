@@ -157,7 +157,7 @@ let initial_env ~loc ~safe_string ~initially_opened_module
     try
       snd (type_open_ Override env lid.loc lid)
     with
-    | (Typetexp.Error _ | Env.Error _ | Magic_numbers.Cmi.Error _) as exn ->
+    | (Typetexp.Error _ | Env.Error _ | Magic_numbers.Cmi.Error _ | Persistent_env.Error _) as exn ->
       Msupport.raise_error exn;
       env
     | exn ->
@@ -2158,14 +2158,29 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
       end
   | Pmod_constraint(sarg, smty) ->
       let arg = type_module ~alias true funct_body anchor env sarg in
-      let mty = transl_modtype env smty in
-      let md =
-        wrap_constraint env true arg mty.mty_type (Tmodtype_explicit mty)
-      in
-      { md with
-        mod_loc = smod.pmod_loc;
-        mod_attributes = smod.pmod_attributes;
-      }
+      begin try 
+        let mty = transl_modtype env smty in
+        let md =
+          wrap_constraint env true arg mty.mty_type (Tmodtype_explicit mty)
+        in
+        { md with
+          mod_loc = smod.pmod_loc;
+          mod_attributes = smod.pmod_attributes;
+        }
+      with exn -> 
+       (* [merlin] For better Construct error messages we need to keep holes
+          in the recovered typedtree *)
+        if sarg.pmod_desc = Pmod_hole then begin
+          Msupport.raise_error exn;
+          { 
+            mod_desc = Tmod_hole;
+            mod_type = Mty_for_hole;
+            mod_loc = sarg.pmod_loc;
+            mod_env = env;
+            mod_attributes = sarg.pmod_attributes;
+          } end
+        else raise exn
+      end
 
   | Pmod_unpack sexp ->
       if !Clflags.principal then Ctype.begin_def ();

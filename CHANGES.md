@@ -2,13 +2,37 @@ git version
 ===========
 
   + merlin binary
-    - recover ill-typed patterns (#1317)
+    - recover ill-typed patterns (#1317, #1342)
     - more accurate type-enclosing for methods (#1328, fixes #1124)
-    - fix location of patterns in Occurrences (#1324, fixes
-      ocaml/ocaml-lsp#375)
+    - fix location of patterns in Occurrences (#1324, fixes ocaml/ocaml-lsp#375)
     - fix location of module definitions done via functors (#1329, fixes #1199)
     - fix -cmt-path dirs mistakenly added to build path (#1330)
     - add new module holes that can replace module expressions (#1333)
+    - add a new command `construct` that builds a list of possible terms when
+      called on a typed hole (#1318)
+    - `refactor-open qualify` improvements (#1313, #1314, #1366)
+      - do not make paths absolute, simply prefix with the identifier under the cursor
+        ```ocaml
+        open Foo (* calling refactor-open qualify on this open *)
+        let _ = Foo.bar (* previously could result in [Dune__exe.Foo.bar] *)
+        ```
+      - do not return identical (duplicate) edits
+      - do not return unnecessary edits that when applied do not change the document
+      - handle record fields properly
+      - handle multi-line paths
+    - Handle `Persistent_env.Error` in `Typemod.initial_env` (#1355)
+    - locate: reset global state from all entry points (#1364)
+  + editor modes
+    - vim: add a simple interface to the new `construct` command:
+      `MerlinConstruct`. When several results are suggested, `<c-i>` and `<c-u>`
+      to show more or less deep results. (#1318)
+    - vim: add support for the `merlin-locate-type` command:
+      `MerlinLocateType` (#1359)
+    - emacs: add a simple interface to the new `construct` command:
+      `merlin-construct`. (#1352)
+    - emacs: add support for the `merlin-locate-type` command. (#1359)
+  + test suite
+    - cover the new `construct` command (#1318)
 
 merlin 4.2
 ==========

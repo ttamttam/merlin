@@ -1267,8 +1267,8 @@ strictly within, or nil if there is no such element."
   "Returns the first `hole` of the list such that
     `(funcall comp hole current-point)`"
   (when holes
-    (let* ((head (first holes))
-           (tail (rest holes))
+    (let* ((head (car holes))
+           (tail (cdr holes))
            (start (merlin-lookup 'start head))
            (hole-point (merlin-make-point start)))
       (if (funcall comp hole-point current-point)
@@ -1304,6 +1304,18 @@ strictly within, or nil if there is no such element."
         (if (and
               (>= hole-point pmin)
               (<= hole-point pmax))
+          (progn
+            (merlin--goto-point start)
+            (message "%s" typ)))))))
+
+(defun merlin--first-hole-between (pmin pmax)
+  "Jump to the first hole in the given range and prints its type"
+  (let* ((hole (merlin--first-hole (merlin--holes) pmin '>)))
+    (when hole
+      (let* ((start (merlin-lookup 'start hole))
+             (typ (merlin-lookup 'type hole))
+             (hole-point (merlin-make-point start)))
+        (if (<= hole-point pmax)
           (progn
             (merlin--goto-point start)
             (message "%s" typ)))))))
@@ -1357,6 +1369,45 @@ strictly within, or nil if there is no such element."
   (merlin--destruct-bounds (if (region-active-p)
                              (cons (region-beginning) (region-end))
                              (cons (point) (point)))))
+
+;;;;;;;;;;;;;;;
+;; CONSTRUCT ;;
+;;;;;;;;;;;;;;;
+
+
+(defun merlin--construct-complete (start stop results)
+  (let ((start (merlin--point-of-pos start))
+        (stop  (merlin--point-of-pos stop)))
+    (cl-labels ((insert-choice (_b _e newtext)
+          (completion--replace start stop newtext)
+          (merlin--first-hole-between start (+ start (length newtext)))))
+      (if (= (length results) 1)
+        (insert-choice 0 0 (car results))
+        (with-output-to-temp-buffer "*Constructions*"
+          (progn 
+            (with-current-buffer "*Constructions*"
+              (setq-local 
+                completion-list-insert-choice-function
+                #'insert-choice))
+            (display-completion-list results)))))))
+
+(defun merlin--construct-point (point)
+  "Execute a construct on POINT"
+  (progn
+    (ignore point) ; Without this Emacs bytecode compiler complains about an    
+                   ; unused variable. This may be a bug in the compiler
+    (let ((result (merlin-call "construct"
+                              "-position" (merlin-unmake-point (point)))))
+      (when result
+        (let* ((loc   (car result))
+              (start (cdr (assoc 'start loc)))
+              (stop  (cdr (assoc 'end loc))))
+          (merlin--construct-complete start stop (cadr result)))))))
+
+(defun merlin-construct ()
+  "Construct over the current hole"
+  (interactive)
+  (merlin--construct-point (cons (point) (point))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1460,6 +1511,17 @@ loading"
   "Locate the identifier under point"
   (interactive)
   (merlin--locate-result (merlin-call-locate)))
+
+(defun merlin-locate-type ()
+  "Locate the type of the expression under point."
+  (interactive)
+  (let ((result (merlin/call "locate-type"
+                             "-position" (merlin/unmake-point (point)))))
+    (unless result
+      (error "Not found. (Check *Messages* for potential errors)"))
+    (unless (listp result)
+      (error "%S" result))
+    (merlin--goto-file-and-point result)))
 
 (defun merlin-pop-stack ()
   "Go back to the last position where the user did a locate."
